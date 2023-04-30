@@ -2,8 +2,10 @@
 #include <opencv2/opencv.hpp>
 #include <yaml-cpp/yaml.h>
 
+
 // Load configuration from yaml
 YAML::Node cfg = YAML::LoadFile("../config.yaml");
+
 
 int main() {
 
@@ -18,6 +20,8 @@ int main() {
     // Prepare for calibration
     cv::Mat frame, frameCalibration;
     inputVideo >> frame;
+
+//    auto out = cv::VideoWriter("video.avi", 'XVID', 3.0, cv::Size(frame.cols, frame.rows));
 
     // Load parameters for calibration
     cv::Mat cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
@@ -49,6 +53,7 @@ int main() {
         inputVideo >> frame;
         if (frame.empty()) break;
         remap(frame, frameCalibration, map1, map2, cv::INTER_LINEAR);
+//        out.write(frame);
 
         // Prepare for sphere detection
         cv::Mat imgOriginal = frameCalibration;
@@ -64,17 +69,30 @@ int main() {
         equalizeHist(hsvSplit[2], hsvSplit[2]);
         merge(hsvSplit, imgHSV);
 
-        cv::Mat gray, binary;
+        cv::Mat gray;
         // convert to gray scale for Hough detecting
-        cvtColor(imgHSV, gray, cv::COLOR_BGR2GRAY);
-        equalizeHist(gray, gray);
+//        cvtColor(imgHSV, gray, cv::COLOR_BGR2GRAY);
+//        equalizeHist(gray, gray);
         // Denoising
+//        auto denoisingStrength = cfg["denoisingStrength"].as<float>();
+//        fastNlMeansDenoising(gray, gray, denoisingStrength);
+
         auto denoisingStrength = cfg["denoisingStrength"].as<float>();
-        fastNlMeansDenoising(gray, gray, denoisingStrength);
+        fastNlMeansDenoising(imgHSV, gray, denoisingStrength);
+
+
+        // Color Detection, targeting purple
+        cv::Mat purple;
+        cv::inRange(imgHSV, cv::Scalar(125, 23, 26), cv::Scalar(145, 255, 255), gray);
+
+        cv::Mat kernel = getStructuringElement(cv::MORPH_RECT, cv::Size(11, 11), cv::Point(-1, -1));
+        morphologyEx(gray, gray, cv::MORPH_OPEN, kernel);
+        morphologyEx(gray, gray, cv::MORPH_CLOSE, kernel);
+
         namedWindow("hough gray", cv::WINDOW_FREERATIO);
         imshow("hough gray", gray);
-        std::vector<cv::Vec3f> circles;
 
+        std::vector<cv::Vec3f> circles;
         // Load parameters for Hough circle detection
         auto minDist = cfg["houghCircle"]["minDist"].as<double>();
         auto param1 = cfg["houghCircle"]["param1"].as<double>();
@@ -82,7 +100,7 @@ int main() {
         int min_r = cfg["houghCircle"]["minRadius"].as<int>();
         int max_r = cfg["houghCircle"]["maxRadius"].as<int>();
         // Detect circles
-        HoughCircles(gray, circles, cv::HOUGH_GRADIENT_ALT, 1.5, minDist, param1, param2, min_r, max_r);
+        HoughCircles(gray, circles, cv::HOUGH_GRADIENT, 1.5, minDist, param1, param2, min_r, max_r);
 
         // For each circle detected
         for (auto &i: circles) {
@@ -120,10 +138,11 @@ int main() {
             // Mark distance on the sphere
             putText(frameCalibration, std::to_string(distance), cv::Point2f(i[0] - i[2], i[1]), 0, 1,
                     cv::Scalar(255, 255, 0), 3);
+
         }
 
         // Display result
-        namedWindow("hough circle", cv::WINDOW_FREERATIO);
+        cv::namedWindow("hough circle", cv::WINDOW_FREERATIO);
         imshow("hough circle", frameCalibration);
 
         // Wait key to quit

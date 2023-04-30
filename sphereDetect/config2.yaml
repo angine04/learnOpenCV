@@ -12,11 +12,11 @@ distCoeffs:
   - -0.00745741077751897
   - 0.2082387251633841
 
-denoisingStrength: 20
+denoisingStrength: 10
 
 houghCircle:
-  minDist: 60
-  minRadius: 60
+  minDist: 30
+  minRadius: 40
   maxRadius: 200
-  param1: 50
-  param2: 30
+  param1: 90
+  param2: 0.92
