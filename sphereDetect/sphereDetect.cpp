@@ -90,11 +90,11 @@ int main() {
         cv::Mat gray;
         // Convert to gray scale for Hough detecting
         cvtColor(imgHSV, gray, cv::COLOR_BGR2GRAY);
-        equalizeHist(gray, gray);
+
         // Denoising
         auto denoisingStrength = cfg["denoisingStrength"].as<float>();
         fastNlMeansDenoising(gray, gray, denoisingStrength);
-
+//        equalizeHist(gray, gray);
 
         int KernelSize = cfg["kernelSize"].as<int>();
         cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(KernelSize, KernelSize), cv::Point(-1, -1));
@@ -175,5 +175,9 @@ int main() {
         int key = cv::waitKey(1);
         if (key == 27 || key == 'q' || key == 'Q') break;
     }
+
+    cv::destroyAllWindows();
+    resultOut.release();
+    originalOut.release();
     return 0;
 }
