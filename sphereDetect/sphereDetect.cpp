@@ -2,13 +2,22 @@
 #include <opencv2/opencv.hpp>
 #include <yaml-cpp/yaml.h>
 
+
 // Load configuration from yaml
 YAML::Node cfg = YAML::LoadFile("../config.yaml");
+bool fromFile = cfg["fromFile"]["enabled"].as<bool>();
+bool saveOriginal = cfg["saveOriginal"]["enabled"].as<bool>();
+bool saveResult = cfg["saveResult"]["enabled"].as<bool>();
 
 int main() {
 
     // Initialize video
-    cv::VideoCapture inputVideo(0);
+    cv::VideoCapture inputVideo;
+    if (fromFile) {
+        inputVideo = cv::VideoCapture(cfg["fromFile"]["fileName"].as<std::string>());
+    } else {
+        inputVideo = cv::VideoCapture(0);
+    }
     if (!inputVideo.isOpened()) {
         std::cout << "video is off\n\n" << std::endl;
     } else {
@@ -18,6 +27,17 @@ int main() {
     // Prepare for calibration
     cv::Mat frame, frameCalibration;
     inputVideo >> frame;
+
+    cv::VideoWriter originalOut, resultOut;
+
+    if (saveOriginal) {
+        originalOut = cv::VideoWriter(cfg["saveOriginal"]["fileName"].as<std::string>(), cv::VideoWriter::fourcc('X','V','I','D'), 3.0,
+                                      cv::Size(frame.cols, frame.rows));
+    }
+    if (saveResult) {
+        resultOut = cv::VideoWriter(cfg["saveResult"]["fileName"].as<std::string>(), cv::VideoWriter::fourcc('X','V','I','D'), 3.0,
+                                    cv::Size(frame.cols, frame.rows));
+    }
 
     // Load parameters for calibration
     cv::Mat cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
@@ -49,6 +69,9 @@ int main() {
         inputVideo >> frame;
         if (frame.empty()) break;
         remap(frame, frameCalibration, map1, map2, cv::INTER_LINEAR);
+        if (saveOriginal) {
+            originalOut.write(frame);
+        }
 
         // Prepare for sphere detection
         cv::Mat imgOriginal = frameCalibration;
@@ -64,17 +87,24 @@ int main() {
         equalizeHist(hsvSplit[2], hsvSplit[2]);
         merge(hsvSplit, imgHSV);
 
-        cv::Mat gray, binary;
-        // convert to gray scale for Hough detecting
+        cv::Mat gray;
+        // Convert to gray scale for Hough detecting
         cvtColor(imgHSV, gray, cv::COLOR_BGR2GRAY);
-        equalizeHist(gray, gray);
+
         // Denoising
         auto denoisingStrength = cfg["denoisingStrength"].as<float>();
         fastNlMeansDenoising(gray, gray, denoisingStrength);
+//        equalizeHist(gray, gray);
+
+        int KernelSize = cfg["kernelSize"].as<int>();
+        cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(KernelSize, KernelSize), cv::Point(-1, -1));
+        morphologyEx(gray, gray, cv::MORPH_OPEN, kernel);
+        morphologyEx(gray, gray, cv::MORPH_CLOSE, kernel);
+
         namedWindow("hough gray", cv::WINDOW_FREERATIO);
         imshow("hough gray", gray);
-        std::vector<cv::Vec3f> circles;
 
+        std::vector<cv::Vec3f> circles;
         // Load parameters for Hough circle detection
         auto minDist = cfg["houghCircle"]["minDist"].as<double>();
         auto param1 = cfg["houghCircle"]["param1"].as<double>();
@@ -108,8 +138,8 @@ int main() {
             };
 
             // Solve PnP problem
-            cv::Mat rVec = cv::Mat::zeros(3, 1, CV_64FC1);//init rvec
-            cv::Mat tVec = cv::Mat::zeros(3, 1, CV_64FC1);//init tvec
+            cv::Mat rVec = cv::Mat::zeros(3, 1, CV_64FC1);
+            cv::Mat tVec = cv::Mat::zeros(3, 1, CV_64FC1);
             solvePnP(obj, points, cameraMatrix, distCoeffs, rVec, tVec, false, cv::SOLVEPNP_ITERATIVE);
 
             // Solve distance
@@ -120,15 +150,34 @@ int main() {
             // Mark distance on the sphere
             putText(frameCalibration, std::to_string(distance), cv::Point2f(i[0] - i[2], i[1]), 0, 1,
                     cv::Scalar(255, 255, 0), 3);
+
+            // Sample hue value of the sphere's center
+            cv::Point2f center(i[0], i[1]);
+            unsigned int hue = static_cast<unsigned int>(hsvSplit[0].at<uchar>(center));
+            // Distinguish the color
+            if (hue >= 120 && hue <= 150) {
+                putText(frameCalibration, "purple", cv::Point2f(i[0] - i[2] / 2, i[1] - i[2] / 2), 0, 1,
+                        cv::Scalar(255, 255, 255), 3);
+            } else if (hue <= 25 && hue >= 7) {
+                putText(frameCalibration, "orange", cv::Point2f(i[0] - i[2] / 2, i[1] - i[2] / 2), 0, 1,
+                        cv::Scalar(255, 255, 255), 3);
+            }
         }
 
         // Display result
-        namedWindow("hough circle", cv::WINDOW_FREERATIO);
+        cv::namedWindow("hough circle", cv::WINDOW_FREERATIO);
         imshow("hough circle", frameCalibration);
+        if (saveResult) {
+            resultOut.write(frameCalibration);
+        }
 
         // Wait key to quit
         int key = cv::waitKey(1);
         if (key == 27 || key == 'q' || key == 'Q') break;
     }
+
+    cv::destroyAllWindows();
+    resultOut.release();
+    originalOut.release();
     return 0;
 }
