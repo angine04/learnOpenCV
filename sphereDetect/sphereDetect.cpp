@@ -5,12 +5,19 @@
 
 // Load configuration from yaml
 YAML::Node cfg = YAML::LoadFile("../config.yaml");
-
+bool fromFile = cfg["fromFile"]["enabled"].as<bool>();
+bool saveOriginal = cfg["saveOriginal"]["enabled"].as<bool>();
+bool saveResult = cfg["saveResult"]["enabled"].as<bool>();
 
 int main() {
 
     // Initialize video
-    cv::VideoCapture inputVideo(0);
+    cv::VideoCapture inputVideo;
+    if (fromFile) {
+        inputVideo = cv::VideoCapture(cfg["fromFile"]["fileName"].as<std::string>());
+    } else {
+        inputVideo = cv::VideoCapture(0);
+    }
     if (!inputVideo.isOpened()) {
         std::cout << "video is off\n\n" << std::endl;
     } else {
@@ -21,7 +28,16 @@ int main() {
     cv::Mat frame, frameCalibration;
     inputVideo >> frame;
 
-//    auto out = cv::VideoWriter("video.avi", 'XVID', 3.0, cv::Size(frame.cols, frame.rows));
+    cv::VideoWriter originalOut, resultOut;
+
+    if (saveOriginal) {
+        originalOut = cv::VideoWriter(cfg["saveOriginal"]["fileName"].as<std::string>(), cv::VideoWriter::fourcc('X','V','I','D'), 3.0,
+                                      cv::Size(frame.cols, frame.rows));
+    }
+    if (saveResult) {
+        resultOut = cv::VideoWriter(cfg["saveResult"]["fileName"].as<std::string>(), cv::VideoWriter::fourcc('X','V','I','D'), 3.0,
+                                    cv::Size(frame.cols, frame.rows));
+    }
 
     // Load parameters for calibration
     cv::Mat cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
@@ -53,7 +69,9 @@ int main() {
         inputVideo >> frame;
         if (frame.empty()) break;
         remap(frame, frameCalibration, map1, map2, cv::INTER_LINEAR);
-//        out.write(frame);
+        if (saveOriginal) {
+            originalOut.write(frame);
+        }
 
         // Prepare for sphere detection
         cv::Mat imgOriginal = frameCalibration;
@@ -70,22 +88,16 @@ int main() {
         merge(hsvSplit, imgHSV);
 
         cv::Mat gray;
-        // convert to gray scale for Hough detecting
-//        cvtColor(imgHSV, gray, cv::COLOR_BGR2GRAY);
-//        equalizeHist(gray, gray);
+        // Convert to gray scale for Hough detecting
+        cvtColor(imgHSV, gray, cv::COLOR_BGR2GRAY);
+        equalizeHist(gray, gray);
         // Denoising
-//        auto denoisingStrength = cfg["denoisingStrength"].as<float>();
-//        fastNlMeansDenoising(gray, gray, denoisingStrength);
-
         auto denoisingStrength = cfg["denoisingStrength"].as<float>();
-        fastNlMeansDenoising(imgHSV, gray, denoisingStrength);
+        fastNlMeansDenoising(gray, gray, denoisingStrength);
 
 
-        // Color Detection, targeting purple
-        cv::Mat purple;
-        cv::inRange(imgHSV, cv::Scalar(125, 23, 26), cv::Scalar(145, 255, 255), gray);
-
-        cv::Mat kernel = getStructuringElement(cv::MORPH_RECT, cv::Size(11, 11), cv::Point(-1, -1));
+        int KernelSize = cfg["kernelSize"].as<int>();
+        cv::Mat kernel = getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(KernelSize, KernelSize), cv::Point(-1, -1));
         morphologyEx(gray, gray, cv::MORPH_OPEN, kernel);
         morphologyEx(gray, gray, cv::MORPH_CLOSE, kernel);
 
@@ -100,7 +112,7 @@ int main() {
         int min_r = cfg["houghCircle"]["minRadius"].as<int>();
         int max_r = cfg["houghCircle"]["maxRadius"].as<int>();
         // Detect circles
-        HoughCircles(gray, circles, cv::HOUGH_GRADIENT, 1.5, minDist, param1, param2, min_r, max_r);
+        HoughCircles(gray, circles, cv::HOUGH_GRADIENT_ALT, 1.5, minDist, param1, param2, min_r, max_r);
 
         // For each circle detected
         for (auto &i: circles) {
@@ -126,8 +138,8 @@ int main() {
             };
 
             // Solve PnP problem
-            cv::Mat rVec = cv::Mat::zeros(3, 1, CV_64FC1);//init rvec
-            cv::Mat tVec = cv::Mat::zeros(3, 1, CV_64FC1);//init tvec
+            cv::Mat rVec = cv::Mat::zeros(3, 1, CV_64FC1);
+            cv::Mat tVec = cv::Mat::zeros(3, 1, CV_64FC1);
             solvePnP(obj, points, cameraMatrix, distCoeffs, rVec, tVec, false, cv::SOLVEPNP_ITERATIVE);
 
             // Solve distance
@@ -139,11 +151,25 @@ int main() {
             putText(frameCalibration, std::to_string(distance), cv::Point2f(i[0] - i[2], i[1]), 0, 1,
                     cv::Scalar(255, 255, 0), 3);
 
+            // Sample hue value of the sphere's center
+            cv::Point2f center(i[0], i[1]);
+            unsigned int hue = static_cast<unsigned int>(hsvSplit[0].at<uchar>(center));
+            // Distinguish the color
+            if (hue >= 120 && hue <= 150) {
+                putText(frameCalibration, "purple", cv::Point2f(i[0] - i[2] / 2, i[1] - i[2] / 2), 0, 1,
+                        cv::Scalar(255, 255, 255), 3);
+            } else if (hue <= 25 && hue >= 7) {
+                putText(frameCalibration, "orange", cv::Point2f(i[0] - i[2] / 2, i[1] - i[2] / 2), 0, 1,
+                        cv::Scalar(255, 255, 255), 3);
+            }
         }
 
         // Display result
         cv::namedWindow("hough circle", cv::WINDOW_FREERATIO);
         imshow("hough circle", frameCalibration);
+        if (saveResult) {
+            resultOut.write(frameCalibration);
+        }
 
         // Wait key to quit
         int key = cv::waitKey(1);

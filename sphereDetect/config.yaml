@@ -1,3 +1,15 @@
+fromFile: 
+  enabled: false
+  fileName: video.avi
+
+saveOriginal: 
+  enabled: true
+  fileName: video.avi
+
+saveResult: 
+  enabled: true
+  fileName: result.avi
+
 ballRadius: 3.5
 
 cameraMatrix:
@@ -13,10 +25,11 @@ distCoeffs:
   - 0.2082387251633841
 
 denoisingStrength: 20
+kernelSize: 9
 
 houghCircle:
-  minDist: 60
-  minRadius: 60
-  maxRadius: 200
-  param1: 50
-  param2: 30
+  minDist: 100
+  minRadius: 30
+  maxRadius: 300
+  param1: 76
+  param2: 0.82
